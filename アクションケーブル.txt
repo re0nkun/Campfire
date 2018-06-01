@@ -1,0 +1,66 @@
+$ rails g channel room speak
+//ブラウザーコンソール App.room.speak() ->true
+//routes.rb/cable.js 編集が不要
+
+// app/assets/javascripts/channels/room.coffee
+  speak: (message) ->
+      @perform 'speak', message: message
+
+// app/channels/room_channel.rb
+  class RoomChannel < ApplicationCable::Channel
+    def subscribed
+      stream_from "room_channel"
+    end
+    def unsubscribed
+      # Any cleanup needed when channel is unsubscribed
+    end
+    def speak(data)
+      ActionCable.server.broadcast 'room_channel', message: data['message']
+    end
+  end
+
+// app/assets/javascripts/channels/room.coffee
+  received: (data) ->
+      alert data['message']
+
+// app/views/rooms/show.html.erb
+  <form>
+    <label>Say something:</label><br>
+    <input type="text" data-behavior="room_speaker">
+  </form>
+
+//app/assets/javascripts/channels/room.coffee
+  $(document).on 'keypress', '[data-behavior~=room_speaker]', (event) ->
+    if event.keyCode is 13 # return = send
+      App.room.speak event.target.value
+      event.target.value = ''
+      event.preventDefault()
+
+// app/channels/room_channel.rb
+  def speak(data)
+    Message.create! content: data['message']
+  end
+
+$ rails g job MessageBroadcast
+
+//app/jobs/message_broadcast_job.rb
+  def perform(message)
+      ActionCable.server.broadcast 'room_channel', message: render_message(message)
+    end
+
+    private
+      def render_message(message)
+        ApplicationController.renderer.render(partial: 'messages/message', locals: { message: message })
+      end
+  end
+
+// app/models/message.rb
+  class Message < ApplicationRecord
+    after_create_commit { MessageBroadcastJob.perform_later self }
+  end
+
+// app/assets/javascripts/channels/room.coffee
+  received: (data) ->
+    $('#messages').append data['message']
+
+
